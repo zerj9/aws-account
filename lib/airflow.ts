@@ -1,7 +1,9 @@
+import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as asg from 'aws-cdk-lib/aws-autoscaling';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Duration } from 'aws-cdk-lib';
@@ -13,7 +15,7 @@ export interface AirflowProps {
   subnetGroup: rds.SubnetGroup;
   fernetSecret: secretsmanager.ISecret;
   dockerhubSecret: secretsmanager.ISecret;
-  //applicationLoadBalancer: elbv2.ApplicationLoadBalancer;
+  listener: elbv2.ApplicationListener;
 }
 
 export class Airflow extends Construct {
@@ -54,6 +56,12 @@ export class Airflow extends Construct {
       backupRetention: Duration.days(7),
     });
 
+//    const ecsInstanceSecurityGroup = new ec2.SecurityGroup(this, 'EcsInstanceSecurityGroup', {
+//      vpc: props.vpc,
+//      description: 'Used by the Airflow ECS Instance',
+//      allowAllOutbound: true
+//    });
+
     const autoScalingGroup = new asg.AutoScalingGroup(this, 'Airflow', {
       vpc: props.vpc,
       instanceType: new ec2.InstanceType('t4g.small'),
@@ -62,11 +70,16 @@ export class Airflow extends Construct {
       maxCapacity: 1
     });
 
+    const capacityProvider = new ecs.AsgCapacityProvider(this, 'AsgCapacityProvider', {
+      autoScalingGroup,
+    });
+
     const cluster = new ecs.Cluster(this, 'AiflowCluster', {
       vpc: props.vpc,
       clusterName: 'Airflow',
       containerInsights: true
     });
+    cluster.addAsgCapacityProvider(capacityProvider);
 
     const airflowCredentialsSecret = new secretsmanager.Secret(this, 'AirflowAdminSecret', {
       description: 'Administrator credentials for Airflow',
@@ -78,25 +91,112 @@ export class Airflow extends Construct {
       },
     });
 
-    const taskDefinition = new ecs.Ec2TaskDefinition(this, 'AirflowTaskDefinition');
+    const taskDefinition = new ecs.Ec2TaskDefinition(this, 'AirflowTaskDefinition', {
+      networkMode: ecs.NetworkMode.AWS_VPC
+    });
 
-    const airflowSchedulerContainer = taskDefinition.addContainer('AirflowSchedulerContainer', {
+    const schedulerContainer = taskDefinition.addContainer('AirflowSchedulerContainer', {
       image: ecs.ContainerImage.fromRegistry(
         'apache/airflow:2.7.3', { credentials: props.dockerhubSecret }
       ),
-      memoryLimitMiB: 1536,
+      memoryLimitMiB: 900,
       environment: {
+        '_AIRFLOW_DB_MIGRATE': 'true',
+        '_AIRFLOW_WWW_USER_CREATE': 'true',
         'AIRFLOW__CORE__EXECUTOR': 'LocalExecutor',
-        'AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD': 'echo postgresql+psycopg2://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}/airflow',
+        'AIRFLOW__DATABASE__SQL_ALCHEMY_CONN': 'postgresql+psycopg2://$DB_USERNAME:$DB_PASSWORD@$DB_HOST/airflow',
         'AIRFLOW__CORE__LOAD_EXAMPLES': 'True'
       },
       secrets: {
+        '_AIRFLOW_WWW_USER_USERNAME': ecs.Secret.fromSecretsManager(airflowCredentialsSecret, 'username'),
+        '_AIRFLOW_WWW_USER_PASSWORD': ecs.Secret.fromSecretsManager(airflowCredentialsSecret, 'password'),
         'AIRFLOW__CORE__FERNET_KEY': ecs.Secret.fromSecretsManager(props.fernetSecret),
         'DB_HOST': ecs.Secret.fromSecretsManager(rdsInstance.secret!, 'host'),
         'DB_USERNAME': ecs.Secret.fromSecretsManager(rdsInstance.secret!, 'username'),
-        'DB_PASSWORD': ecs.Secret.fromSecretsManager(rdsInstance.secret!, 'password')
+        'DB_PASSWORD': ecs.Secret.fromSecretsManager(rdsInstance.secret!, 'password'),
       },
-      command: ["scheduler"]
+      logging: ecs.LogDrivers.awsLogs({
+        streamPrefix: 'scheduler',
+        logRetention: logs.RetentionDays.THREE_MONTHS,
+        mode: ecs.AwsLogDriverMode.NON_BLOCKING,
+        maxBufferSize: cdk.Size.mebibytes(25),
+      }),
+      command: ["scheduler"],
+      healthCheck: {
+        command: [ "CMD-SHELL", "airflow jobs check --job-type SchedulerJob" ],
+        interval: Duration.minutes(1),
+        retries: 3,
+        startPeriod: Duration.minutes(2),
+        timeout: Duration.seconds(30),
+      }
     });
+
+   const webServerContainer = taskDefinition.addContainer('AirflowWebServerContainer', {
+      image: ecs.ContainerImage.fromRegistry(
+        'apache/airflow:2.7.3', { credentials: props.dockerhubSecret }
+      ),
+      memoryLimitMiB: 900,
+      environment: {
+        '_AIRFLOW_DB_MIGRATE': 'true',
+        '_AIRFLOW_WWW_USER_CREATE': 'true',
+        'AIRFLOW__CORE__EXECUTOR': 'LocalExecutor',
+        'AIRFLOW__DATABASE__SQL_ALCHEMY_CONN': 'postgresql+psycopg2://$DB_USERNAME:$DB_PASSWORD@$DB_HOST/airflow',
+        'AIRFLOW__CORE__LOAD_EXAMPLES': 'True',
+        'FORWARDED_ALLOW_IPS': '*'
+      },
+      secrets: {
+        '_AIRFLOW_WWW_USER_USERNAME': ecs.Secret.fromSecretsManager(airflowCredentialsSecret, 'username'),
+        '_AIRFLOW_WWW_USER_PASSWORD': ecs.Secret.fromSecretsManager(airflowCredentialsSecret, 'password'),
+        'AIRFLOW__CORE__FERNET_KEY': ecs.Secret.fromSecretsManager(props.fernetSecret),
+        'DB_HOST': ecs.Secret.fromSecretsManager(rdsInstance.secret!, 'host'),
+        'DB_USERNAME': ecs.Secret.fromSecretsManager(rdsInstance.secret!, 'username'),
+        'DB_PASSWORD': ecs.Secret.fromSecretsManager(rdsInstance.secret!, 'password'),
+      },
+      logging: ecs.LogDrivers.awsLogs({
+        streamPrefix: 'webserver',
+        logRetention: logs.RetentionDays.THREE_MONTHS,
+        mode: ecs.AwsLogDriverMode.NON_BLOCKING,
+        maxBufferSize: cdk.Size.mebibytes(25),
+      }),
+      command: ["webserver"]
+    });
+
+    webServerContainer.addPortMappings({
+      containerPort: 8080,
+      protocol: ecs.Protocol.TCP,
+    });
+
+    const schedulerDependency: ecs.ContainerDependency = {
+      container: schedulerContainer,
+      condition: ecs.ContainerDependencyCondition.HEALTHY,
+    };
+    webServerContainer.addContainerDependencies(schedulerDependency);
+    taskDefinition.defaultContainer = webServerContainer
+
+    const serviceSecurityGroup = new ec2.SecurityGroup(this, 'AirflowServiceSecurityGroup', {
+      vpc: props.vpc,
+      description: 'Used by the Airflow ECS Service',
+      allowAllOutbound: true
+    });
+    serviceSecurityGroup.addIngressRule(
+      ec2.Peer.ipv4(props.vpc.vpcCidrBlock),
+      ec2.Port.tcp(8080),
+      'Allow 8080 traffic from within the VPC' // Change this to only allow ALB
+    );
+
+    const ecsService = new ecs.Ec2Service(this, 'AirflowService', {
+      cluster,
+      taskDefinition,
+      enableExecuteCommand: true,
+      assignPublicIp: true,
+      securityGroups: [serviceSecurityGroup]
+    });
+
+//    props.listener.addTargets('AirflowListenerTargets', {
+//      priority: 10,
+//      port: 8080,
+//      conditions: [elbv2.ListenerCondition.hostHeaders(['airflow.analyticsplatform.co'])],
+//      targets: [ecsService]
+//    });
   }
 }

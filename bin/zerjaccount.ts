@@ -7,4 +7,9 @@ const prod  = { account: '314492765508', region: 'eu-west-2' };
 
 const app = new cdk.App();
 const coreStackProd = new CoreStack(app, 'CoreStackProd', { env: prod });
-new DataStack(app, 'DataStackProd', { env: prod, vpc: coreStackProd.network.vpc, subnetGroup: coreStackProd.network.subnetGroup});
+new DataStack(app, 'DataStackProd', {
+  env: prod,
+  vpc: coreStackProd.network.vpc,
+  subnetGroup: coreStackProd.network.subnetGroup,
+  listener: coreStackProd.network.httpsListener
+});
