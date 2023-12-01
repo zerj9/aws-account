@@ -14,7 +14,6 @@ export class CoreStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-
     const hostedZone = route53.PublicHostedZone.fromPublicHostedZoneAttributes(
       this, 'AnalyticsPlatformHostedZone', {
         hostedZoneId: 'Z0342334382XCESQG37FY',

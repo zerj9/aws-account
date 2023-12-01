@@ -1,6 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import * as asg from 'aws-cdk-lib/aws-autoscaling';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -11,8 +10,8 @@ import { Duration } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 export interface AirflowProps {
-  vpc: ec2.Vpc;
-  subnetGroup: rds.SubnetGroup;
+  vpc: ec2.IVpc;
+  subnetGroup: rds.ISubnetGroup;
   fernetSecret: secretsmanager.ISecret;
   dockerhubSecret: secretsmanager.ISecret;
   listener: elbv2.ApplicationListener;
@@ -56,30 +55,6 @@ export class Airflow extends Construct {
       backupRetention: Duration.days(7),
     });
 
-//    const ecsInstanceSecurityGroup = new ec2.SecurityGroup(this, 'EcsInstanceSecurityGroup', {
-//      vpc: props.vpc,
-//      description: 'Used by the Airflow ECS Instance',
-//      allowAllOutbound: true
-//    });
-
-    const autoScalingGroup = new asg.AutoScalingGroup(this, 'Airflow', {
-      vpc: props.vpc,
-      instanceType: new ec2.InstanceType('t4g.small'),
-      machineImage: ecs.EcsOptimizedImage.amazonLinux2(ecs.AmiHardwareType.ARM),
-      minCapacity: 1,
-      maxCapacity: 1
-    });
-
-    const capacityProvider = new ecs.AsgCapacityProvider(this, 'AsgCapacityProvider', {
-      autoScalingGroup,
-    });
-
-    const cluster = new ecs.Cluster(this, 'AiflowCluster', {
-      vpc: props.vpc,
-      clusterName: 'Airflow',
-      containerInsights: true
-    });
-    cluster.addAsgCapacityProvider(capacityProvider);
 
     const airflowCredentialsSecret = new secretsmanager.Secret(this, 'AirflowAdminSecret', {
       description: 'Administrator credentials for Airflow',
@@ -91,8 +66,9 @@ export class Airflow extends Construct {
       },
     });
 
-    const taskDefinition = new ecs.Ec2TaskDefinition(this, 'AirflowTaskDefinition', {
-      networkMode: ecs.NetworkMode.AWS_VPC
+    const taskDefinition = new ecs.FargateTaskDefinition(this, 'AirflowTaskDefinition', {
+      cpu: 1024,
+      memoryLimitMiB: 2048
     });
 
     const schedulerContainer = taskDefinition.addContainer('AirflowSchedulerContainer', {
@@ -105,7 +81,7 @@ export class Airflow extends Construct {
         '_AIRFLOW_WWW_USER_CREATE': 'true',
         'AIRFLOW__CORE__EXECUTOR': 'LocalExecutor',
         'AIRFLOW__DATABASE__SQL_ALCHEMY_CONN': 'postgresql+psycopg2://$DB_USERNAME:$DB_PASSWORD@$DB_HOST/airflow',
-        'AIRFLOW__CORE__LOAD_EXAMPLES': 'True'
+        'AIRFLOW__CORE__LOAD_EXAMPLES': 'False'
       },
       secrets: {
         '_AIRFLOW_WWW_USER_USERNAME': ecs.Secret.fromSecretsManager(airflowCredentialsSecret, 'username'),
@@ -141,7 +117,8 @@ export class Airflow extends Construct {
         '_AIRFLOW_WWW_USER_CREATE': 'true',
         'AIRFLOW__CORE__EXECUTOR': 'LocalExecutor',
         'AIRFLOW__DATABASE__SQL_ALCHEMY_CONN': 'postgresql+psycopg2://$DB_USERNAME:$DB_PASSWORD@$DB_HOST/airflow',
-        'AIRFLOW__CORE__LOAD_EXAMPLES': 'True',
+        'AIRFLOW__CORE__LOAD_EXAMPLES': 'False',
+        'AIRFLOW__WEBSERVER__EXPOSE_CONFIG': 'True',
         'FORWARDED_ALLOW_IPS': '*'
       },
       secrets: {
@@ -162,6 +139,7 @@ export class Airflow extends Construct {
     });
 
     webServerContainer.addPortMappings({
+      name: 'airflow-web-server',
       containerPort: 8080,
       protocol: ecs.Protocol.TCP,
     });
@@ -173,30 +151,26 @@ export class Airflow extends Construct {
     webServerContainer.addContainerDependencies(schedulerDependency);
     taskDefinition.defaultContainer = webServerContainer
 
-    const serviceSecurityGroup = new ec2.SecurityGroup(this, 'AirflowServiceSecurityGroup', {
+    const ecsCluster = new ecs.Cluster(this, 'AiflowCluster', {
       vpc: props.vpc,
-      description: 'Used by the Airflow ECS Service',
-      allowAllOutbound: true
+      clusterName: 'Airflow',
+      containerInsights: true
     });
-    serviceSecurityGroup.addIngressRule(
-      ec2.Peer.ipv4(props.vpc.vpcCidrBlock),
-      ec2.Port.tcp(8080),
-      'Allow 8080 traffic from within the VPC' // Change this to only allow ALB
-    );
 
-    const ecsService = new ecs.Ec2Service(this, 'AirflowService', {
-      cluster,
+    const ecsService = new ecs.FargateService(this, 'AirflowService', {
+      cluster: ecsCluster,
       taskDefinition,
       enableExecuteCommand: true,
       assignPublicIp: true,
-      securityGroups: [serviceSecurityGroup]
+      healthCheckGracePeriod: Duration.minutes(2)
     });
 
-//    props.listener.addTargets('AirflowListenerTargets', {
-//      priority: 10,
-//      port: 8080,
-//      conditions: [elbv2.ListenerCondition.hostHeaders(['airflow.analyticsplatform.co'])],
-//      targets: [ecsService]
-//    });
+    props.listener.addTargets('AirflowListenerTargets', {
+      priority: 10,
+      port: taskDefinition.defaultContainer.portMappings[0].containerPort,
+      conditions: [elbv2.ListenerCondition.hostHeaders(['airflow.analyticsplatform.co'])],
+      targets: [ecsService.loadBalancerTarget({containerName: 'AirflowWebServerContainer', containerPort: 8080})],
+      healthCheck: { path: '/health', healthyHttpCodes: '200-299', healthyThresholdCount: 2  }
+    });
   }
 }

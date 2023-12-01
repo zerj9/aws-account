@@ -14,6 +14,7 @@ export interface NetworkProps {
 export class Network extends Construct {
   public readonly vpc: ec2.Vpc;
   public readonly subnetGroup: rds.SubnetGroup; 
+  public readonly alb: elbv2.ApplicationLoadBalancer;
   public readonly httpsListener: elbv2.ApplicationListener; 
 
   constructor(scope: Construct, id: string, props: NetworkProps) {
@@ -35,7 +36,7 @@ export class Network extends Construct {
       vpc: this.vpc,
       description: 'Subnet Group with all subnets',
       vpcSubnets: {
-        subnets: this.vpc.publicSubnets
+        subnets: this.vpc.publicSubnets,
       }
     });
 
@@ -45,12 +46,12 @@ export class Network extends Construct {
       validation: acm.CertificateValidation.fromDns(props.hostedZone),
     });
 
-    const alb = new elbv2.ApplicationLoadBalancer(this, 'ApplicationLoadBalancer', {
+    this.alb = new elbv2.ApplicationLoadBalancer(this, 'ApplicationLoadBalancer', {
       vpc: this.vpc,
-      internetFacing: true
+      internetFacing: true,
     });
 
-    alb.addListener('Listener80', {
+    this.alb.addListener('Listener80', {
       port: 80,
       open: true,
       defaultAction: elbv2.ListenerAction.redirect({
@@ -60,21 +61,21 @@ export class Network extends Construct {
       })
     });
 
-    this.httpsListener = alb.addListener('Listener443', {
+    this.httpsListener = this.alb.addListener('Listener443', {
       port: 443,
       certificates: [certificate],
       open: true,
-      defaultAction: elbv2.ListenerAction.fixedResponse(404)
+      defaultAction: elbv2.ListenerAction.fixedResponse(404),
     });
 
     new route53.ARecord(this, 'Route53AlbRecord', {
       zone: props.hostedZone,
-      target: route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(alb))
+      target: route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(this.alb)),
     })
 
     new route53.ARecord(this, 'Route53AlbRecordSubDomain', {
       zone: props.hostedZone,
-      target: route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(alb)),
+      target: route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(this.alb)),
       recordName: '*'
     })
 
