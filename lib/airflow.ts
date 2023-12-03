@@ -15,6 +15,10 @@ export interface AirflowProps {
   fernetSecret: secretsmanager.ISecret;
   dockerhubSecret: secretsmanager.ISecret;
   listener: elbv2.ApplicationListener;
+  gitSync?: {
+    repo: string
+    patSecret: secretsmanager.ISecret
+  }
 }
 
 export class Airflow extends Construct {
@@ -70,6 +74,7 @@ export class Airflow extends Construct {
       cpu: 1024,
       memoryLimitMiB: 2048
     });
+    taskDefinition.addVolume({ name: 'airflow-dags' });
 
     const schedulerContainer = taskDefinition.addContainer('AirflowSchedulerContainer', {
       image: ecs.ContainerImage.fromRegistry(
@@ -106,6 +111,7 @@ export class Airflow extends Construct {
         timeout: Duration.seconds(30),
       }
     });
+    schedulerContainer.addMountPoints({ sourceVolume: 'airflow-dags', readOnly: false, containerPath: '/home/airflow/dags' });
 
    const webServerContainer = taskDefinition.addContainer('AirflowWebServerContainer', {
       image: ecs.ContainerImage.fromRegistry(
@@ -143,6 +149,32 @@ export class Airflow extends Construct {
       containerPort: 8080,
       protocol: ecs.Protocol.TCP,
     });
+
+    if (props.gitSync != null) {
+      const gitSyncContainer = taskDefinition.addContainer('GitSyncContainer', {
+        image: ecs.ContainerImage.fromRegistry(
+          'alpine:3.18', { credentials: props.dockerhubSecret }
+        ),
+        memoryLimitMiB: 50,
+        environment: {
+          'GITHUB_REPO': 'zerj9/airflow-dags'
+        },
+        secrets: {
+          'GITHUB_PAT': ecs.Secret.fromSecretsManager(props.gitSync.patSecret),
+        },
+        logging: ecs.LogDrivers.awsLogs({
+          streamPrefix: 'gitsync',
+          logRetention: logs.RetentionDays.THREE_MONTHS,
+          mode: ecs.AwsLogDriverMode.NON_BLOCKING,
+          maxBufferSize: cdk.Size.mebibytes(25),
+        }),
+        entryPoint: ['/bin/sh', '-c'],
+        command: ['apk add --no-cache git; git clone --depth 1 https://$GITHUB_PAT@github.com/$GITHUB_REPO ~/dags; while true; do cd ~/dags && git pull; sleep 10; done']
+      })
+      gitSyncContainer.addMountPoints({ sourceVolume: 'airflow-dags', readOnly: false, containerPath: '/root/dags'});
+    } else {
+      console.log("NO SYNC")
+    }
 
     const schedulerDependency: ecs.ContainerDependency = {
       container: schedulerContainer,

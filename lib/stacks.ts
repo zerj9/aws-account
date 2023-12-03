@@ -34,13 +34,18 @@ export class DataStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
 
+    const githubPatSecret = secretsmanager.Secret.fromSecretNameV2(this, 'GithubPatSecret', 'GitHubAirflowPat')
+
     new Airflow(this, "Airflow", {
       vpc: props.vpc,
       subnetGroup: props.subnetGroup,
       fernetSecret: secretsmanager.Secret.fromSecretNameV2(this, 'AirflowFernetSecret', 'AirflowFernetSecret'),
       dockerhubSecret: secretsmanager.Secret.fromSecretNameV2(this, 'DockerHubSecret', 'DockerHub'),
-      listener: props.listener
-
+      listener: props.listener,
+      gitSync: {
+        repo: 'zerj9/airflow-dags',
+        patSecret: githubPatSecret,
+      }
     });
   }
 }
