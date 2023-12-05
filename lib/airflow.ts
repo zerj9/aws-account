@@ -110,8 +110,10 @@ export class Airflow extends Construct {
         'AIRFLOW__CORE__DAGS_FOLDER': '/home/airflow/dags',
         'AIRFLOW__DATABASE__SQL_ALCHEMY_CONN': 'postgresql+psycopg2://$DB_USERNAME:$DB_PASSWORD@$DB_HOST/airflow',
         'AIRFLOW__CORE__LOAD_EXAMPLES': 'False',
+        '_PIP_ADDITIONAL_REQUIREMENTS': 'awswrangler',
           ...(props.s3RawData && {AIRFLOW_VAR_S3_RAW_BUCKET: props.s3RawData.bucketName}),
           ...(props.s3DataLake && {AIRFLOW_VAR_S3_DATA_LAKE_BUCKET: props.s3DataLake.bucketName}),
+
       },
       secrets: {
         '_AIRFLOW_WWW_USER_USERNAME': ecs.Secret.fromSecretsManager(airflowCredentialsSecret, 'username'),
@@ -131,7 +133,7 @@ export class Airflow extends Construct {
       healthCheck: {
         command: [ "CMD-SHELL", "airflow jobs check --job-type SchedulerJob" ],
         interval: Duration.minutes(1),
-        retries: 3,
+        retries: 10,
         startPeriod: Duration.minutes(2),
         timeout: Duration.seconds(30),
       }
@@ -221,7 +223,7 @@ export class Airflow extends Construct {
       taskDefinition,
       enableExecuteCommand: true,
       assignPublicIp: true,
-      healthCheckGracePeriod: Duration.minutes(2)
+      healthCheckGracePeriod: Duration.minutes(5)
     });
 
     props.listener.addTargets('AirflowListenerTargets', {
@@ -229,7 +231,7 @@ export class Airflow extends Construct {
       port: taskDefinition.defaultContainer.portMappings[0].containerPort,
       conditions: [elbv2.ListenerCondition.hostHeaders(['airflow.analyticsplatform.co'])],
       targets: [ecsService.loadBalancerTarget({containerName: 'AirflowWebServerContainer', containerPort: 8080})],
-      healthCheck: { path: '/health', healthyHttpCodes: '200-299', healthyThresholdCount: 2  }
+      healthCheck: { path: '/health', healthyHttpCodes: '200-299', healthyThresholdCount: 2, unhealthyThresholdCount: 10  }
     });
   }
 }
