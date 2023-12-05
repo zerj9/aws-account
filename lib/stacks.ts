@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as glue from 'aws-cdk-lib/aws-glue';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
@@ -33,6 +34,13 @@ interface DataStackProps extends cdk.StackProps {
 export class DataStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
+
+    const cfnDatabase = new glue.CfnDatabase(this, 'DataLakeGlueDatabase', {
+      catalogId: this.account,
+      databaseInput: {
+        name: 'datalake',
+      }
+    });
 
     const githubPatSecret = secretsmanager.Secret.fromSecretNameV2(this, 'GithubPatSecret', 'GitHubAirflowPat')
 
