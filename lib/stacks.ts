@@ -4,6 +4,7 @@ import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as glue from 'aws-cdk-lib/aws-glue';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { Network } from './network';
@@ -35,6 +36,22 @@ export class DataStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
 
+    const rawDataBucket = new s3.Bucket(this, 'RawDataBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      versioned: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    const dataLakeBucket = new s3.Bucket(this, 'DataLakeBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      versioned: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
     const cfnDatabase = new glue.CfnDatabase(this, 'DataLakeGlueDatabase', {
       catalogId: this.account,
       databaseInput: {
@@ -53,7 +70,9 @@ export class DataStack extends cdk.Stack {
       gitSync: {
         repo: 'zerj9/airflow-dags',
         patSecret: githubPatSecret,
-      }
+      },
+      s3RawData: rawDataBucket,
+      s3DataLake: dataLakeBucket,
     });
   }
 }

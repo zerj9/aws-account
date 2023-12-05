@@ -2,8 +2,10 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as rds from 'aws-cdk-lib/aws-rds';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Duration } from 'aws-cdk-lib';
 
@@ -18,7 +20,9 @@ export interface AirflowProps {
   gitSync?: {
     repo: string
     patSecret: secretsmanager.ISecret
-  }
+  };
+  s3RawData?: s3.IBucket;
+  s3DataLake?: s3.IBucket;
 }
 
 export class Airflow extends Construct {
@@ -76,6 +80,24 @@ export class Airflow extends Construct {
     });
     taskDefinition.addVolume({ name: 'airflow-dags' });
 
+    if (props.s3RawData) {
+      taskDefinition.addToTaskRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['s3:Put*', 's3:Get*', 's3:List*', 's3:Delete*'],
+          resources: [`${props.s3RawData.bucketArn}/*`],
+        })
+      );
+    }
+
+    if (props.s3DataLake) {
+      taskDefinition.addToTaskRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['s3:Put*', 's3:Get*', 's3:List*'],
+          resources: [`${props.s3DataLake.bucketArn}/*`],
+        })
+      );
+    }
+
     const schedulerContainer = taskDefinition.addContainer('AirflowSchedulerContainer', {
       image: ecs.ContainerImage.fromRegistry(
         'apache/airflow:2.7.3', { credentials: props.dockerhubSecret }
@@ -86,7 +108,9 @@ export class Airflow extends Construct {
         '_AIRFLOW_WWW_USER_CREATE': 'true',
         'AIRFLOW__CORE__EXECUTOR': 'LocalExecutor',
         'AIRFLOW__DATABASE__SQL_ALCHEMY_CONN': 'postgresql+psycopg2://$DB_USERNAME:$DB_PASSWORD@$DB_HOST/airflow',
-        'AIRFLOW__CORE__LOAD_EXAMPLES': 'False'
+        'AIRFLOW__CORE__LOAD_EXAMPLES': 'False',
+          ...(props.s3RawData && {AIRFLOW_VAR_S3_RAW_BUCKET: props.s3RawData.bucketName}),
+          ...(props.s3DataLake && {AIRFLOW_VAR_S3_DATA_LAKE_BUCKET: props.s3DataLake.bucketName}),
       },
       secrets: {
         '_AIRFLOW_WWW_USER_USERNAME': ecs.Secret.fromSecretsManager(airflowCredentialsSecret, 'username'),
@@ -125,7 +149,9 @@ export class Airflow extends Construct {
         'AIRFLOW__DATABASE__SQL_ALCHEMY_CONN': 'postgresql+psycopg2://$DB_USERNAME:$DB_PASSWORD@$DB_HOST/airflow',
         'AIRFLOW__CORE__LOAD_EXAMPLES': 'False',
         'AIRFLOW__WEBSERVER__EXPOSE_CONFIG': 'True',
-        'FORWARDED_ALLOW_IPS': '*'
+        'FORWARDED_ALLOW_IPS': '*',
+        ...(props.s3RawData && {AIRFLOW_VAR_S3_RAW_BUCKET: props.s3RawData.bucketName}),
+        ...(props.s3DataLake && {AIRFLOW_VAR_S3_DATA_LAKE_BUCKET: props.s3DataLake.bucketName}),
       },
       secrets: {
         '_AIRFLOW_WWW_USER_USERNAME': ecs.Secret.fromSecretsManager(airflowCredentialsSecret, 'username'),
