@@ -107,6 +107,7 @@ export class Airflow extends Construct {
         '_AIRFLOW_DB_MIGRATE': 'true',
         '_AIRFLOW_WWW_USER_CREATE': 'true',
         'AIRFLOW__CORE__EXECUTOR': 'LocalExecutor',
+        'AIRFLOW__CORE__DAGS_FOLDER': '/home/airflow/dags',
         'AIRFLOW__DATABASE__SQL_ALCHEMY_CONN': 'postgresql+psycopg2://$DB_USERNAME:$DB_PASSWORD@$DB_HOST/airflow',
         'AIRFLOW__CORE__LOAD_EXAMPLES': 'False',
           ...(props.s3RawData && {AIRFLOW_VAR_S3_RAW_BUCKET: props.s3RawData.bucketName}),
