@@ -7,6 +7,7 @@ import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 import { Network } from './network';
+import { DataPipelines } from './data-pipelines/data-pipelines';
 
 export class CoreStack extends cdk.Stack {
   public readonly network: Network;
@@ -50,15 +51,17 @@ export class DataStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
-    const cfnDatabase = new glue.CfnDatabase(this, 'DataLakeGlueDatabase', {
+    const dataLakeDatabase = new glue.CfnDatabase(this, 'DataLakeGlueDatabase', {
       catalogId: this.account,
       databaseInput: {
         name: 'datalake',
       }
     });
 
+    new DataPipelines(this, 'Pipelines', {
       s3RawData: rawDataBucket,
       s3DataLake: dataLakeBucket,
+      dataLakeDatabaseName: (dataLakeDatabase.databaseInput as glue.CfnDatabase.DatabaseInputProperty).name!,
     });
   }
 }
