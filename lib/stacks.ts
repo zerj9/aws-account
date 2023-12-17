@@ -5,10 +5,8 @@ import * as glue from 'aws-cdk-lib/aws-glue';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as s3 from 'aws-cdk-lib/aws-s3';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { Network } from './network';
-import { Airflow } from './airflow';
 
 export class CoreStack extends cdk.Stack {
   public readonly network: Network;
@@ -59,18 +57,6 @@ export class DataStack extends cdk.Stack {
       }
     });
 
-    const githubPatSecret = secretsmanager.Secret.fromSecretNameV2(this, 'GithubPatSecret', 'GitHubAirflowPat')
-
-    new Airflow(this, "Airflow", {
-      vpc: props.vpc,
-      subnetGroup: props.subnetGroup,
-      fernetSecret: secretsmanager.Secret.fromSecretNameV2(this, 'AirflowFernetSecret', 'AirflowFernetSecret'),
-      dockerhubSecret: secretsmanager.Secret.fromSecretNameV2(this, 'DockerHubSecret', 'DockerHub'),
-      listener: props.listener,
-      gitSync: {
-        repo: 'zerj9/airflow-dags',
-        patSecret: githubPatSecret,
-      },
       s3RawData: rawDataBucket,
       s3DataLake: dataLakeBucket,
     });
