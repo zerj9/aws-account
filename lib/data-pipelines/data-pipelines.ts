@@ -54,5 +54,26 @@ export class DataPipelines extends Construct {
         layerArns: ['arn:aws:lambda:eu-west-2:336392948345:layer:AWSSDKPandas-Python311-Arm64:4']
       },
     });
+
+    new Pipeline(this, 'EnvironmentAgencyFloods', {
+      datasetProvider: 'Environment-Agency',
+      datasetName: 'Floods',
+      datasetType: 'json',
+      scheduleExpression: "cron(*/30 * * * ? *)",
+      s3RawData: props.s3RawData,
+      s3DataLake: props.s3DataLake,
+      dataLakeDatabaseName: props.dataLakeDatabaseName,
+      extractLambda: httpCallLambdaAlias,
+      scheduleGroupName: cfnScheduleGroup.name!,
+      extractConfig: {
+        url: 'https://environment.data.gov.uk/flood-monitoring/id/floods',
+      },
+      transformLoadConfig: {
+        path: path.join(__dirname, 'files/ea-floods-tl'),
+        handler: 'main.handler',
+        layerArns: ['arn:aws:lambda:eu-west-2:336392948345:layer:AWSSDKPandas-Python311-Arm64:4']
+      },
+    });
+
   }
 }
