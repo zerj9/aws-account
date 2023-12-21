@@ -73,7 +73,20 @@ export default class Pipeline extends Construct {
       lambdaFunction: transformLoadLambda,
     });
 
-    const definition = getDataLambda.next(invokeTransformLoadLambda);
+    const passConfig = new sfn.Pass(this, 'ConfigData', {
+      result: sfn.Result.fromObject({
+        datasetProvider: props.datasetProvider,
+        datasetName: props.datasetName,
+        datasetType: props.datasetType,
+        dataLakeBucket: props.s3DataLake.bucketName,
+        dataLakeDatabaseName: props.dataLakeDatabaseName,
+        rawBucket: props.s3RawData.bucketName,
+        ...props.extractConfig
+      }),
+      resultPath: '$.config',
+    });
+
+    const definition = passConfig.next(getDataLambda).next(invokeTransformLoadLambda);
 
     const stateMachine = new sfn.StateMachine(this, 'StateMachine', {
       definitionBody: sfn.DefinitionBody.fromChainable(definition),
@@ -94,15 +107,6 @@ export default class Pipeline extends Construct {
       target: {
         arn: stateMachine.stateMachineArn,
         roleArn: schedulerRole.roleArn,
-        input: JSON.stringify({
-          datasetProvider: props.datasetProvider,
-          datasetName: props.datasetName,
-          datasetType: props.datasetType,
-          dataLakeBucket: props.s3DataLake.bucketName,
-          dataLakeDatabaseName: props.dataLakeDatabaseName,
-          rawBucket: props.s3RawData.bucketName,
-          ...props.extractConfig
-        }),
       },
       description: `${props.datasetProvider} - ${props.datasetName}`,
       name: `${props.datasetProvider}-${props.datasetName}`,

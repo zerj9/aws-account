@@ -31,21 +31,22 @@ def store_data(s3_client: 'S3Client', data: bytes, bucket_name: str, key: str):
 
 
 def handler(event, context):
-    data = get_data(http, event['url'])
+    config = event['config']
+    data = get_data(http, config['url'])
     now = datetime.utcnow().isoformat()
-    key = f'{event["datasetProvider"]}/{event["datasetName"]}/{event["datasetName"]}-{now}.{event["datasetType"]}'
+    key = f'{config["datasetProvider"]}/{config["datasetName"]}/{config["datasetName"]}-{now}.{config["datasetType"]}'
     store_data(
             s3_client,
             data,
-            event['rawBucket'],
+            config['rawBucket'],
             key
     )
 
     return {
-        'rawBucket': event['rawBucket'],
+        'rawBucket': config['rawBucket'],
         'rawKey': key,
-        'datasetProvider': event['datasetProvider'],
-        'datasetName': event['datasetName'],
-        'dataLakeBucket': event['dataLakeBucket'],
-        'dataLakeDatabaseName': event['dataLakeDatabaseName']
+        'datasetProvider': config['datasetProvider'],
+        'datasetName': config['datasetName'],
+        'dataLakeBucket': config['dataLakeBucket'],
+        'dataLakeDatabaseName': config['dataLakeDatabaseName']
     }
