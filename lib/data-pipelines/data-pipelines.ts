@@ -24,6 +24,13 @@ export class DataPipelines extends Construct {
     });
     props.s3RawData.grantWrite(httpCallLambda);
 
+    const httpCallLambdaVersion = httpCallLambda.currentVersion;
+    const httpCallLambdaAlias = new lambda.Alias(this, 'HttpCallLambdaAlias', {
+      aliasName: 'Current',
+      version: httpCallLambdaVersion,
+      provisionedConcurrentExecutions: 0,
+    });
+
     const cfnScheduleGroup = new scheduler.CfnScheduleGroup(this, 'DataPipelinesScheduleGroup', {
       name: 'data-pipelines',
     });
@@ -36,7 +43,7 @@ export class DataPipelines extends Construct {
       s3RawData: props.s3RawData,
       s3DataLake: props.s3DataLake,
       dataLakeDatabaseName: props.dataLakeDatabaseName,
-      extractLambda: httpCallLambda,
+      extractLambda: httpCallLambdaAlias,
       scheduleGroupName: cfnScheduleGroup.name!,
       extractConfig: {
         url: 'https://data.api.trade.gov.uk/v1/datasets/market-barriers/versions/v1.0.10/data?format=json',
