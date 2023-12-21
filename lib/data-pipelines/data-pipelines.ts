@@ -39,7 +39,7 @@ export class DataPipelines extends Construct {
       datasetProvider: 'dit',
       datasetName: 'trade-barriers',
       datasetType: 'json',
-      scheduleExpression: "cron(0 * * * ? *)", // Every hour
+      scheduleExpression: "cron(0 */4 * * ? *)",
       s3RawData: props.s3RawData,
       s3DataLake: props.s3DataLake,
       dataLakeDatabaseName: props.dataLakeDatabaseName,
