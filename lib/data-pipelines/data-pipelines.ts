@@ -75,5 +75,24 @@ export class DataPipelines extends Construct {
       },
     });
 
+    new Pipeline(this, 'NhsUecSitrep', {
+      datasetProvider: 'NHS',
+      datasetName: 'UEC-Sitrep',
+      datasetType: 'xlsx',
+      scheduleExpression: "cron(45 9 ? * FRI *)",
+      s3RawData: props.s3RawData,
+      s3DataLake: props.s3DataLake,
+      dataLakeDatabaseName: props.dataLakeDatabaseName,
+      extractLambda: httpCallLambdaAlias,
+      scheduleGroupName: cfnScheduleGroup.name!,
+      extractConfig: {
+        url: 'https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2023/12/Web-File-Timeseries-UEC-Daily-SitRep-2.xlsx',
+      },
+      transformLoadConfig: {
+        path: path.join(__dirname, 'files/nhs-uec-sitrep-tl'),
+        handler: 'main.handler',
+        layerArns: ['arn:aws:lambda:eu-west-2:336392948345:layer:AWSSDKPandas-Python311-Arm64:4']
+      },
+    });
   }
 }
